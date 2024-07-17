@@ -1,0 +1,21 @@
+
+Act as an expert product owner and generate a description of a demo that can 
+run on Streamlit and utilizes Generative AI technologies.
+You can describe any functionality from object detection to audio transcription. Feel free to improvise. Don't make it too complicated because it needs to be self contained and relaitvely straightforward. Generate up to 100 words. Instruct the engineer to add visual elements and dummy data.
+
+Please provide a structured response with bullet points covering:
+- Main features of the demo
+- User interface elements
+- Data processing steps
+
+Don't provide example code.
+
+Tools available to the software engineer
+1. Streamlit for the user interface (required)
+2. Azure OpenAI Chat API to do text generation, summarisation, text analysis, emotion analysis etc. (optional)
+3. Azure OpenAI Chat API with images attached to do image analysis, video analysis (from frames), emotion analysis etc. (optional)
+4. Azure Whisper API to extract text from audio (optional)
+5. Document Intelligence API to extract insights from documents (optional)
+6. Other Python libraries (such as plotly for visualizations)
+
+Don't overdo it with functionality. This needs to be a simple demo.
