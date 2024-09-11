@@ -1,6 +1,8 @@
 import os
 import streamlit as st
 from openai import AzureOpenAI
+from azure.cosmos import CosmosClient, PartitionKey
+from azure.cosmos.exceptions import CosmosResourceNotFoundError
 import tempfile
 import importlib.util
 import sys
@@ -26,6 +28,15 @@ OPENAI_DEPLOYMENT_NAME = os.getenv("OPENAI_DEPLOYMENT_NAME")
 OPENAI_ENDPOINT = os.getenv("OPENAI_ENDPOINT")
 DOCUMENT_INTELLIGENCE_ENDPOINT = os.getenv("DOCUMENT_INTELLIGENCE_ENDPOINT")
 DOCUMENT_INTELLIGENCE_KEY = os.getenv("DOCUMENT_INTELLIGENCE_KEY")
+COSMOS_DB_KEY = os.getenv("COSMOS_DB_KEY")
+COSMOS_DB_ENDPOINT = os.getenv("COSMOS_DB_ENDPOINT")
+COSMOS_DB_DATABASE_NAME = os.getenv("COSMOS_DB_DATABASE_NAME")
+COSMOS_DB_CONTAINER_NAME = os.getenv("COSMOS_DB_CONTAINER_NAME")
+
+# Initialize Cosmos DB client
+cosmos_client = CosmosClient(COSMOS_DB_ENDPOINT, COSMOS_DB_KEY)
+database = cosmos_client.get_database_client(COSMOS_DB_DATABASE_NAME)
+container = database.get_container_client(COSMOS_DB_CONTAINER_NAME)
 
 # Initialize Azure OpenAI client
 client = AzureOpenAI(
@@ -55,6 +66,38 @@ if 'progress' not in st.session_state:
     st.session_state.progress = 0
 if 'last_successful_run' not in st.session_state:
     st.session_state.last_successful_run = None
+
+def save_demo(use_case, detailed_description, code):
+    demo_id = str(uuid.uuid4())
+    demo_data = {
+        'id': demo_id,
+        'use_case': use_case,
+        'detailed_description': detailed_description,
+        'code': code
+    }
+    
+    container.create_item(body=demo_data)
+    
+    return demo_data
+
+def delete_demo(demo_id):
+    try:
+        container.delete_item(item=demo_id, partition_key=demo_id)
+        return True
+    except CosmosResourceNotFoundError:
+        return False
+
+def load_demo(demo_id):
+    try:
+        return container.read_item(item=demo_id, partition_key=demo_id)
+    except CosmosResourceNotFoundError:
+        return None
+
+def get_all_demos():
+    query = "SELECT * FROM c"
+    return list(container.query_items(query=query, enable_cross_partition_query=True))
+
+
 
 def generate_detailed_description(use_case_description):
     st.toast("Generating detailed description...")
@@ -157,11 +200,7 @@ def edit_code(user_input, current_code):
     return response.choices[0].message.content
 
 
-# Add this new function to save demos
 def save_demo(use_case, detailed_description, code):
-    if not os.path.exists('demos'):
-        os.makedirs('demos')
-    
     demo_id = str(uuid.uuid4())
     demo_data = {
         'id': demo_id,
@@ -170,26 +209,26 @@ def save_demo(use_case, detailed_description, code):
         'code': code
     }
     
-    with open(f'demos/{demo_id}.json', 'w') as f:
-        json.dump(demo_data, f)
+    container.create_item(body=demo_data)
     
     return demo_data
 
-# Add a new function to delete a demo
 def delete_demo(demo_id):
-    file_path = f'demos/{demo_id}.json'
-    if os.path.exists(file_path):
-        os.remove(file_path)
+    try:
+        container.delete_item(item=demo_id, partition_key=demo_id)
         return True
-    return False
+    except CosmosResourceNotFoundError:
+        return False
 
-# Add a new function to load a demo
 def load_demo(demo_id):
-    file_path = f'demos/{demo_id}.json'
-    if os.path.exists(file_path):
-        with open(file_path, 'r') as f:
-            return json.load(f)
-    return None
+    try:
+        return container.read_item(item=demo_id, partition_key=demo_id)
+    except CosmosResourceNotFoundError:
+        return None
+
+def get_all_demos():
+    query = "SELECT * FROM c"
+    return list(container.query_items(query=query, enable_cross_partition_query=True))
 
 # Modify the save_and_load_script function
 def save_and_load_script(code):
@@ -336,11 +375,34 @@ def main():
         with col1:
             st.subheader("Current Code")
             if st.session_state.generated_code:
-                st.code(st.session_state.generated_code, language='python')
+                # Use streamlit-ace for the code editor
+                from streamlit_ace import st_ace
+
+                edited_code = st_ace(
+                    value=st.session_state.generated_code,
+                    language="python",
+                    theme="dusk",
+                    key="ace_editor",
+                    height=600
+                )
+
+                if edited_code != st.session_state.generated_code:
+                    st.session_state.generated_code = edited_code
+                    script_path = save_and_load_script(edited_code)
+                    if script_path:
+                        st.session_state.script_path = script_path
+                        st.session_state.progress = 0
+                        progress_bar.progress(st.session_state.progress)
+                        st.success("Code updated successfully! Please go to the Run Demo tab to verify the changes.")
+                        success, result = run_script(st.session_state.script_path)
+                        st.experimental_rerun()
+                    else:
+                        st.error("Failed to save the updated code. Please try again.")
             else:
                 st.info("No code generated yet. Please generate code first.")
+
         with col2:
-            st.subheader("Chat")
+            st.subheader("AI-Assisted Editing")
             user_input = st.text_area("Enter your code edit request:")
             if st.button("Submit Edit Request"):
                 if st.session_state.generated_code:
@@ -355,7 +417,7 @@ def main():
                         progress_bar.progress(st.session_state.progress)
                         st.success("Code updated successfully! Please go to the Run Demo tab to verify the changes.")
                         success, result = run_script(st.session_state.script_path)
-                        st.rerun()
+                        st.experimental_rerun()
                     else:
                         st.error("Failed to save the updated code. Please try again.")
                 else:
@@ -367,9 +429,9 @@ def main():
                     st.text_input("You:", message, key=f"user_{uuid.uuid4()}", disabled=True)
                 else:
                     st.text_area("Assistant:", message, key=f"assistant_{uuid.uuid4()}", disabled=True)
+
+
     with tab5:
-        
-        # Add "Save Current Demo" button
         if st.session_state.use_case_description and st.session_state.detailed_description and st.session_state.generated_code:
             if st.button("Save Current Demo"):
                 demo_data = save_demo(st.session_state.use_case_description, st.session_state.detailed_description, st.session_state.generated_code)
@@ -378,46 +440,39 @@ def main():
             st.info("Generate a demo before saving to the library.")
         
         st.subheader("Saved Demos:")
-        if os.path.exists('demos'):
-            demo_files = [f for f in os.listdir('demos') if f.endswith('.json')]
-            for demo_file in demo_files:
-                with open(f'demos/{demo_file}', 'r') as f:
-                    demo_data = json.load(f)
-                
-                
+        demos = get_all_demos()
+        if demos:
+            for demo_data in demos:
                 with st.expander(f"{demo_data['use_case']}"):
-
                     col1, col2, col3, col4 = st.columns([4, 1, 1, 3])
                     with col1:
                         st.markdown(f"#### {demo_data['use_case']}")
                         st.write(f"Demo ID: {demo_data['id']}")
 
                     with col4:
-                        if st.button(f"View {demo_data['id'][:8]}"):
+                        if st.button(f"View {demo_data['id'][:8]}", key=f"view_{demo_data['id']}"):
                             st.write("Detailed Description:")
                             st.write(demo_data['detailed_description'])
                             st.write("Code:")
                             st.code(demo_data['code'], language='python')
                     with col2:
-                        if st.button(f"Load {demo_data['id'][:8]}"):
+                        if st.button(f"Load {demo_data['id'][:8]}", key=f"load_{demo_data['id']}"):
                             st.session_state.use_case_description = demo_data['use_case']
                             st.session_state.detailed_description = demo_data['detailed_description']
                             st.session_state.generated_code = demo_data['code']
                             st.session_state.script_path = save_and_load_script(demo_data['code'])
                             st.success(f"Demo {demo_data['id']} loaded successfully!")
                             st.info("Switch to the 'Run Code' tab to execute the loaded demo.")
-                            st.rerun()
+                            st.experimental_rerun()
                     with col3:
-                        if st.button(f"Delete {demo_data['id'][:8]}"):
+                        if st.button(f"Delete {demo_data['id'][:8]}", key=f"delete_{demo_data['id']}"):
                             if delete_demo(demo_data['id']):
                                 st.success(f"Demo {demo_data['id']} deleted successfully!")
-                                st.rerun()
+                                st.experimental_rerun()
                             else:
                                 st.error(f"Failed to delete demo {demo_data['id']}.")
-
         else:
             st.info("No demos saved yet. Generate and save some demos to see them here!")
-
 
 if __name__ == "__main__":
     main()

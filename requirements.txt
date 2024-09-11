@@ -1,4 +1,10 @@
-streamlit
+streamlit==1.36.0
 openai
 python-dotenv
 azure-ai-formrecognizer
+azure-cosmos
+plotly
+numpy
+pandas
+streamlit-ace
+tiktoken
