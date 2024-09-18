@@ -1,6 +1,7 @@
 import os
 import streamlit as st
 from openai import AzureOpenAI
+from azure.identity import DefaultAzureCredential
 from azure.cosmos import CosmosClient, PartitionKey
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
 import tempfile
@@ -34,7 +35,7 @@ COSMOS_DB_DATABASE_NAME = os.getenv("COSMOS_DB_DATABASE_NAME")
 COSMOS_DB_CONTAINER_NAME = os.getenv("COSMOS_DB_CONTAINER_NAME")
 
 # Initialize Cosmos DB client
-cosmos_client = CosmosClient(COSMOS_DB_ENDPOINT, COSMOS_DB_KEY)
+cosmos_client = CosmosClient(COSMOS_DB_ENDPOINT, credential=DefaultAzureCredential())
 database = cosmos_client.get_database_client(COSMOS_DB_DATABASE_NAME)
 container = database.get_container_client(COSMOS_DB_CONTAINER_NAME)
 
